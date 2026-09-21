@@ -1,0 +1,104 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="theme-color" content="#111827">
+  <title>Random Number Generator 1–49</title>
+  <style>
+    :root{font-family:system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;color:#111827;background:#f8fafc}
+    *{box-sizing:border-box} body{margin:0;padding:20px}.app{max-width:760px;margin:auto}
+    h1{font-size:1.7rem;margin:0 0 6px}.sub{color:#64748b;margin:0 0 22px}
+    .card{background:white;border:1px solid #e2e8f0;border-radius:18px;padding:18px;margin-bottom:16px}
+    label,.label{font-weight:700;display:block;margin-bottom:8px}
+    select,button{font:inherit} select{width:100%;padding:13px;border:1px solid #cbd5e1;border-radius:12px;background:white;font-size:16px}
+    .grid{display:grid;grid-template-columns:repeat(7,1fr);gap:8px;margin-top:12px}
+    .num{aspect-ratio:1;border:1px solid #cbd5e1;border-radius:50%;background:white;font-weight:700;min-width:0}
+    .num.excluded{background:#e2e8f0;color:#94a3b8;text-decoration:line-through;border-color:#94a3b8}
+    .actions{display:flex;gap:10px;flex-wrap:wrap;margin-top:16px}
+    .primary,.secondary{border:0;border-radius:12px;padding:13px 17px;font-weight:750;min-height:48px}
+    .primary{background:#111827;color:white}.secondary{background:#e2e8f0;color:#111827}
+    .result{display:flex;gap:10px;flex-wrap:wrap;min-height:58px;margin-top:12px}
+    .ball{width:52px;height:52px;border-radius:50%;display:flex;align-items:center;justify-content:center;background:#111827;color:white;font-size:1.15rem;font-weight:800}
+    .muted{color:#64748b;font-size:.9rem}.history-row{padding:9px 0;border-bottom:1px solid #e2e8f0;font-weight:650}
+    .history-row:last-child{border-bottom:0}.error{color:#b91c1c;margin-top:10px;font-weight:650}
+    @media(max-width:420px){body{padding:14px}.grid{gap:6px}.num{font-size:.9rem}.ball{width:46px;height:46px}}
+  </style>
+</head>
+<body>
+<main class="app">
+  <h1>Random Number Generator</h1>
+  <p class="sub">Generate unique numbers from 1 to 49.</p>
+
+  <section class="card">
+    <label for="count">How many numbers?</label>
+    <select id="count"></select>
+  </section>
+
+  <section class="card">
+    <div class="label">Exclude numbers</div>
+    <div class="muted">Tap a number to exclude it from future draws. Your choices are saved on this device.</div>
+    <div id="grid" class="grid"></div>
+    <div class="actions"><button id="clear" class="secondary" type="button">Clear exclusions</button></div>
+  </section>
+
+  <section class="card">
+    <div class="label">Your numbers</div>
+    <div id="result" class="result"><span class="muted">Tap Generate Numbers to start.</span></div>
+    <div id="message" class="error" aria-live="polite"></div>
+    <div class="actions">
+      <button id="generate" class="primary" type="button">Generate Numbers</button>
+      <button id="reset" class="secondary" type="button">Reset All</button>
+    </div>
+  </section>
+
+  <section class="card">
+    <div class="label">Recent draws</div>
+    <div id="history" class="muted">No draws yet.</div>
+  </section>
+</main>
+
+<script>
+const grid=document.getElementById("grid"), count=document.getElementById("count"),
+result=document.getElementById("result"), message=document.getElementById("message"),
+historyEl=document.getElementById("history");
+let excluded=new Set(JSON.parse(localStorage.getItem("rng49Excluded")||"[]"));
+let history=JSON.parse(localStorage.getItem("rng49History")||"[]");
+
+for(let n=2;n<=12;n++){const o=document.createElement("option");o.value=n;o.textContent=n+" numbers";if(n===6)o.selected=true;count.appendChild(o)}
+
+function save(){localStorage.setItem("rng49Excluded",JSON.stringify([...excluded]));localStorage.setItem("rng49History",JSON.stringify(history))}
+function renderGrid(){
+ grid.innerHTML="";
+ for(let n=1;n<=49;n++){
+  const b=document.createElement("button");b.type="button";b.className="num"+(excluded.has(n)?" excluded":"");b.textContent=n;
+  b.setAttribute("aria-pressed",excluded.has(n));
+  b.addEventListener("click",()=>{excluded.has(n)?excluded.delete(n):excluded.add(n);save();renderGrid();message.textContent=""});
+  grid.appendChild(b);
+ }
+}
+function renderHistory(){
+ if(!history.length){historyEl.className="muted";historyEl.textContent="No draws yet.";return}
+ historyEl.className="";historyEl.innerHTML="";
+ history.slice(0,10).forEach(draw=>{const d=document.createElement("div");d.className="history-row";d.textContent=draw.join(" · ");historyEl.appendChild(d)})
+}
+function generate(){
+ const qty=Number(count.value), pool=[];
+ for(let n=1;n<=49;n++)if(!excluded.has(n))pool.push(n);
+ if(pool.length<qty){message.textContent=`Only ${pool.length} numbers are available. Clear some exclusions.`;return}
+ if(window.crypto&&crypto.getRandomValues){
+   for(let i=pool.length-1;i>0;i--){const a=new Uint32Array(1);crypto.getRandomValues(a);const j=a[0]%(i+1);[pool[i],pool[j]]=[pool[j],pool[i]]}
+ }else{
+   for(let i=pool.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[pool[i],pool[j]]=[pool[j],pool[i]]}
+ }
+ const draw=pool.slice(0,qty).sort((a,b)=>a-b);
+ result.innerHTML="";draw.forEach(n=>{const s=document.createElement("span");s.className="ball";s.textContent=n;result.appendChild(s)});
+ message.textContent="";history.unshift(draw);history=history.slice(0,10);save();renderHistory();
+}
+document.getElementById("generate").addEventListener("click",generate);
+document.getElementById("clear").addEventListener("click",()=>{excluded.clear();save();renderGrid();message.textContent=""});
+document.getElementById("reset").addEventListener("click",()=>{excluded.clear();history=[];count.value="6";result.innerHTML='<span class="muted">Tap Generate Numbers to start.</span>';message.textContent="";save();renderGrid();renderHistory()});
+renderGrid();renderHistory();
+</script>
+</body>
+</html>
