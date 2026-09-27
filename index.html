@@ -15,7 +15,7 @@ label,.label{font-weight:750;display:block;margin-bottom:8px}select,button{font:
 .ball{width:52px;height:52px;border-radius:50%;display:flex;align-items:center;justify-content:center;background:#111827;color:#fff;font-size:1.15rem;font-weight:850}
 .error{color:#b91c1c;margin-top:10px;font-weight:650}.stat{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:12px}.stat>div{background:#f8fafc;border-radius:14px;padding:13px}
 .big{font-size:1.2rem;font-weight:850;margin-top:3px}.tablewrap{overflow-x:auto;margin-top:14px}table{border-collapse:collapse;width:100%;min-width:560px}th,td{text-align:left;padding:10px 8px;border-bottom:1px solid #e2e8f0;font-size:.9rem}th{color:#475569}
-.history-row{padding:9px 0;border-bottom:1px solid #e2e8f0;font-weight:650}.history-row:last-child{border-bottom:0}
+.history-row{padding:9px 0;border-bottom:1px solid #e2e8f0;font-weight:650}.history-row:last-child{border-bottom:0}.freq-controls{display:flex;gap:10px;flex-wrap:wrap;align-items:center}.status{margin-top:10px}.freq-num{font-weight:850}.hot{font-weight:850}.draw-list{font-size:.88rem;line-height:1.65;margin-top:12px}.mini-ball{display:inline-flex;width:27px;height:27px;border-radius:50%;align-items:center;justify-content:center;background:#111827;color:#fff;font-size:.78rem;font-weight:800;margin:2px}.add-ball{background:#64748b}
 @media(max-width:420px){body{padding:12px}.grid{gap:5px}.num{font-size:.88rem}.ball{width:46px;height:46px}.stat{grid-template-columns:1fr}}
 </style>
 </head>
@@ -49,7 +49,17 @@ label,.label{font-weight:750;display:block;margin-bottom:8px}select,button{font:
 <div class="muted" style="margin-top:12px">For 2–6 picks, the target is that every number you picked appears among the 6 drawn. For 7–12 picks, the target is that your selected set contains all 6 winning numbers. “Conditional” assumes every excluded number is definitely absent from the winning six; simply guessing exclusions does not change the underlying lottery odds.</div>
 </section>
 
-<section class="card"><div class="label">Recent draws</div><div id="history" class="muted">No draws yet.</div></section>
+
+<section class="card">
+<div class="label">Last 16 TOTO draws · Frequency</div>
+<div class="muted">Retrieves the latest 16 completed Singapore Pools TOTO draws through your Cloudflare Worker and counts the 6 main winning numbers. The Additional Number is tracked separately.</div>
+<div class="freq-controls actions"><button id="loadToto" class="primary" type="button">Retrieve latest 16 draws</button><button id="sortFreq" class="secondary" type="button">Sort by frequency</button></div>
+<div id="totoStatus" class="muted status">No draw data loaded yet. Tap Retrieve latest 16 draws.</div>
+<div class="tablewrap"><table><thead><tr><th>Number</th><th>Main frequency</th><th>% of draws</th><th>Additional</th><th>Last seen</th></tr></thead><tbody id="freqTable"></tbody></table></div>
+<div id="totoDraws" class="draw-list"></div>
+</section>
+
+<section class="card"><div class="label">Recent generated sets</div><div id="history" class="muted">No draws yet.</div></section>
 </main>
 <script>
 const grid=document.getElementById("grid"),count=document.getElementById("count"),result=document.getElementById("result"),message=document.getElementById("message"),historyEl=document.getElementById("history");
@@ -85,6 +95,50 @@ function renderGrid(){grid.innerHTML="";for(let n=1;n<=49;n++){const b=document.
 function renderHistory(){if(!history.length){historyEl.className="muted";historyEl.textContent="No draws yet.";return}historyEl.className="";historyEl.innerHTML="";history.slice(0,10).forEach(draw=>{const d=document.createElement("div");d.className="history-row";d.textContent=draw.join(" · ");historyEl.appendChild(d)})}
 function randomIndex(max){if(window.crypto&&crypto.getRandomValues){const a=new Uint32Array(1);crypto.getRandomValues(a);return a[0]%max}return Math.floor(Math.random()*max)}
 function generate(){const qty=Number(count.value),pool=[];for(let n=1;n<=49;n++)if(!excluded.has(n))pool.push(n);if(pool.length<qty){message.textContent=`Only ${pool.length} numbers are available. Clear some exclusions.`;return}for(let i=pool.length-1;i>0;i--){const j=randomIndex(i+1);[pool[i],pool[j]]=[pool[j],pool[i]]}const draw=pool.slice(0,qty).sort((a,b)=>a-b);result.innerHTML="";draw.forEach(n=>{const s=document.createElement("span");s.className="ball";s.textContent=n;result.appendChild(s)});message.textContent="";history.unshift(draw);history=history.slice(0,10);save();renderHistory()}
+let totoDraws=[],freqSorted=false;
+const TOTO_STORE="rng49TotoCollector";
+function validDraw(d){return d&&Number.isInteger(+d.drawNo)&&Array.isArray(d.numbers)&&d.numbers.length===6&&d.numbers.every(n=>Number.isInteger(+n)&&n>=1&&n<=49)}
+function saveTotoCollector(draws){const map=new Map();draws.filter(validDraw).forEach(d=>map.set(+d.drawNo,{drawNo:+d.drawNo,date:d.date||"",numbers:d.numbers.map(Number).sort((a,b)=>a-b),additional:d.additional?+d.additional:null}));const all=[...map.values()].sort((a,b)=>b.drawNo-a.drawNo);localStorage.setItem(TOTO_STORE,JSON.stringify(all));return all}
+function loadTotoCollector(){try{return saveTotoCollector(JSON.parse(localStorage.getItem(TOTO_STORE)||"[]"))}catch(e){return []}}
+function useLatest16(){totoDraws=loadTotoCollector().slice(0,16);renderFreq()}
+function renderFreq(){
+ const body=document.getElementById("freqTable");body.innerHTML="";
+ const list=document.getElementById("totoDraws");
+ if(!totoDraws.length){body.innerHTML='<tr><td colspan="5" class="muted">No draw data loaded — frequency is not calculated yet.</td></tr>';list.innerHTML="";return}
+ const rows=Array.from({length:49},(_,i)=>({n:i+1,main:0,add:0,last:null}));
+ totoDraws.forEach((d,idx)=>{d.numbers.forEach(n=>{rows[n-1].main++;if(rows[n-1].last===null)rows[n-1].last=idx});if(d.additional&&rows[d.additional-1])rows[d.additional-1].add++});
+ if(freqSorted)rows.sort((a,b)=>b.main-a.main||a.n-b.n);
+ rows.forEach(r=>{const tr=document.createElement("tr");tr.innerHTML=`<td class="freq-num">${r.n}</td><td class="${r.main>=4?'hot':''}">${r.main}</td><td>${(r.main/totoDraws.length*100).toFixed(2)}%</td><td>${r.add}</td><td>${r.last===null?'Not in last '+totoDraws.length:(r.last===0?'Latest draw':r.last+' draw'+(r.last===1?'':'s')+' ago')}</td>`;body.appendChild(tr)});
+ list.innerHTML=totoDraws.map(d=>`<div><strong>Draw ${d.drawNo}</strong>${d.date?' · '+d.date:''} — ${d.numbers.map(n=>`<span class="mini-ball">${n}</span>`).join('')} <span class="muted">+ </span><span class="mini-ball add-ball">${d.additional??'?'}</span></div>`).join('');
+}
+const TOTO_WORKER="https://toto-results.choonlong-teo2812.workers.dev/";
+async function loadToto(){
+ const btn=document.getElementById("loadToto"),status=document.getElementById("totoStatus");
+ btn.disabled=true;
+ status.textContent="Retrieving latest 16 TOTO draws…";
+ try{
+   const url=TOTO_WORKER+"?t="+Date.now();
+   const r=await fetch(url,{cache:"no-store"});
+   if(!r.ok)throw new Error("Worker returned HTTP "+r.status);
+   const data=await r.json();
+   if(!data.success)throw new Error(data.error||"Worker retrieval failed");
+   if(!Array.isArray(data.draws))throw new Error("Worker response does not contain draws");
+   const incoming=data.draws.filter(validDraw);
+   if(incoming.length<16)throw new Error(`Worker returned only ${incoming.length} valid draws`);
+   saveTotoCollector([...loadTotoCollector(),...incoming]);
+   useLatest16();
+   status.textContent=`Loaded latest ${totoDraws.length} draws · Draw ${totoDraws[0].drawNo} to ${totoDraws[totoDraws.length-1].drawNo}. Frequency uses ${totoDraws.length*6} main-number observations.`;
+ }catch(e){
+   useLatest16();
+   status.textContent=totoDraws.length
+     ? `Refresh failed (${e.message}). Showing ${totoDraws.length} previously stored draws.`
+     : `Could not load TOTO data (${e.message}).`;
+ }finally{btn.disabled=false}
+}
+document.getElementById("loadToto").addEventListener("click",loadToto);document.getElementById("sortFreq").addEventListener("click",()=>{freqSorted=!freqSorted;document.getElementById("sortFreq").textContent=freqSorted?"Sort by number":"Sort by frequency";renderFreq()});
+// Migrate data from the earlier version, then use the collector as the single source of truth.
+try{const old=JSON.parse(localStorage.getItem("rng49Toto16")||"[]");if(old.length)saveTotoCollector([...loadTotoCollector(),...old])}catch(e){}
+useLatest16();if(totoDraws.length)document.getElementById("totoStatus").textContent=`Showing ${totoDraws.length} stored unique draws. Tap Retrieve to refresh.`;
 count.addEventListener("change",updateProb);document.getElementById("generate").addEventListener("click",generate);
 document.getElementById("clear").addEventListener("click",()=>{excluded.clear();save();renderGrid();updateProb();message.textContent=""});
 document.getElementById("reset").addEventListener("click",()=>{excluded.clear();history=[];count.value="6";result.innerHTML='<span class="muted">Tap Generate Numbers to start.</span>';message.textContent="";save();renderGrid();renderHistory();updateProb()});
