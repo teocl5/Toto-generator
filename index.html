@@ -53,7 +53,7 @@ label,.label{font-weight:750;display:block;margin-bottom:8px}select,button{font:
 <section class="card">
 <div class="label">Last 16 TOTO draws · Frequency</div>
 <div class="muted">Retrieves the latest 16 completed Singapore Pools TOTO draws through your Cloudflare Worker and counts the 6 main winning numbers. The Additional Number is tracked separately.</div>
-<div class="freq-controls actions"><button id="loadToto" class="primary" type="button">Retrieve latest 16 draws</button><button id="sortFreq" class="secondary" type="button">Sort by frequency</button></div>
+<div class="freq-controls actions"><button id="loadToto" class="primary" type="button">Retrieve latest 16 draws</button><button id="sortHigh" class="secondary" type="button">Frequency: High → Low</button><button id="sortLow" class="secondary" type="button">Frequency: Low → High</button><button id="sortOverdue" class="secondary" type="button">Longest Not Appeared</button></div>
 <div id="totoStatus" class="muted status">No draw data loaded yet. Tap Retrieve latest 16 draws.</div>
 <div class="tablewrap"><table><thead><tr><th>Number</th><th>Main frequency</th><th>% of draws</th><th>Additional</th><th>Last seen</th></tr></thead><tbody id="freqTable"></tbody></table></div>
 <div id="totoDraws" class="draw-list"></div>
@@ -95,7 +95,7 @@ function renderGrid(){grid.innerHTML="";for(let n=1;n<=49;n++){const b=document.
 function renderHistory(){if(!history.length){historyEl.className="muted";historyEl.textContent="No draws yet.";return}historyEl.className="";historyEl.innerHTML="";history.slice(0,10).forEach(draw=>{const d=document.createElement("div");d.className="history-row";d.textContent=draw.join(" · ");historyEl.appendChild(d)})}
 function randomIndex(max){if(window.crypto&&crypto.getRandomValues){const a=new Uint32Array(1);crypto.getRandomValues(a);return a[0]%max}return Math.floor(Math.random()*max)}
 function generate(){const qty=Number(count.value),pool=[];for(let n=1;n<=49;n++)if(!excluded.has(n))pool.push(n);if(pool.length<qty){message.textContent=`Only ${pool.length} numbers are available. Clear some exclusions.`;return}for(let i=pool.length-1;i>0;i--){const j=randomIndex(i+1);[pool[i],pool[j]]=[pool[j],pool[i]]}const draw=pool.slice(0,qty).sort((a,b)=>a-b);result.innerHTML="";draw.forEach(n=>{const s=document.createElement("span");s.className="ball";s.textContent=n;result.appendChild(s)});message.textContent="";history.unshift(draw);history=history.slice(0,10);save();renderHistory()}
-let totoDraws=[],freqSorted=false;
+let totoDraws=[],freqSortMode="number";
 const TOTO_STORE="rng49TotoCollector";
 function validDraw(d){return d&&Number.isInteger(+d.drawNo)&&Array.isArray(d.numbers)&&d.numbers.length===6&&d.numbers.every(n=>Number.isInteger(+n)&&n>=1&&n<=49)}
 function saveTotoCollector(draws){const map=new Map();draws.filter(validDraw).forEach(d=>map.set(+d.drawNo,{drawNo:+d.drawNo,date:d.date||"",numbers:d.numbers.map(Number).sort((a,b)=>a-b),additional:d.additional?+d.additional:null}));const all=[...map.values()].sort((a,b)=>b.drawNo-a.drawNo);localStorage.setItem(TOTO_STORE,JSON.stringify(all));return all}
@@ -107,7 +107,9 @@ function renderFreq(){
  if(!totoDraws.length){body.innerHTML='<tr><td colspan="5" class="muted">No draw data loaded — frequency is not calculated yet.</td></tr>';list.innerHTML="";return}
  const rows=Array.from({length:49},(_,i)=>({n:i+1,main:0,add:0,last:null}));
  totoDraws.forEach((d,idx)=>{d.numbers.forEach(n=>{rows[n-1].main++;if(rows[n-1].last===null)rows[n-1].last=idx});if(d.additional&&rows[d.additional-1])rows[d.additional-1].add++});
- if(freqSorted)rows.sort((a,b)=>b.main-a.main||a.n-b.n);
+ if(freqSortMode==="high")rows.sort((a,b)=>b.main-a.main||((b.last??999)-(a.last??999))||a.n-b.n);
+ else if(freqSortMode==="low")rows.sort((a,b)=>a.main-b.main||((b.last??999)-(a.last??999))||a.n-b.n);
+ else if(freqSortMode==="overdue")rows.sort((a,b)=>{const ag=a.last===null?totoDraws.length:a.last,bg=b.last===null?totoDraws.length:b.last;return bg-ag||a.main-b.main||a.n-b.n});
  rows.forEach(r=>{const tr=document.createElement("tr");tr.innerHTML=`<td class="freq-num">${r.n}</td><td class="${r.main>=4?'hot':''}">${r.main}</td><td>${(r.main/totoDraws.length*100).toFixed(2)}%</td><td>${r.add}</td><td>${r.last===null?'Not in last '+totoDraws.length:(r.last===0?'Latest draw':r.last+' draw'+(r.last===1?'':'s')+' ago')}</td>`;body.appendChild(tr)});
  list.innerHTML=totoDraws.map(d=>`<div><strong>Draw ${d.drawNo}</strong>${d.date?' · '+d.date:''} — ${d.numbers.map(n=>`<span class="mini-ball">${n}</span>`).join('')} <span class="muted">+ </span><span class="mini-ball add-ball">${d.additional??'?'}</span></div>`).join('');
 }
@@ -135,7 +137,11 @@ async function loadToto(){
      : `Could not load TOTO data (${e.message}).`;
  }finally{btn.disabled=false}
 }
-document.getElementById("loadToto").addEventListener("click",loadToto);document.getElementById("sortFreq").addEventListener("click",()=>{freqSorted=!freqSorted;document.getElementById("sortFreq").textContent=freqSorted?"Sort by number":"Sort by frequency";renderFreq()});
+document.getElementById("loadToto").addEventListener("click",loadToto);
+function setFreqSort(mode){freqSortMode=mode;renderFreq()}
+document.getElementById("sortHigh").addEventListener("click",()=>setFreqSort("high"));
+document.getElementById("sortLow").addEventListener("click",()=>setFreqSort("low"));
+document.getElementById("sortOverdue").addEventListener("click",()=>setFreqSort("overdue"));
 // Migrate data from the earlier version, then use the collector as the single source of truth.
 try{const old=JSON.parse(localStorage.getItem("rng49Toto16")||"[]");if(old.length)saveTotoCollector([...loadTotoCollector(),...old])}catch(e){}
 useLatest16();if(totoDraws.length)document.getElementById("totoStatus").textContent=`Showing ${totoDraws.length} stored unique draws. Tap Retrieve to refresh.`;
